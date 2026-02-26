@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Reset Password",
+    "content": "Users can reset their password from Settings > Security. Click 'Reset Password' and complete email verification."
+  },
+  {
+    "title": "Update Email",
+    "content": "To update email address, go to Profile > Account Information and save the new email."
+  },
+  {
+    "title": "Delete Account",
+    "content": "Accounts can be permanently deleted from Settings > Privacy. This action cannot be undone."
+  },
+  {
+    "title": "Subscription Plans",
+    "content": "Users may upgrade or downgrade subscription plans from Billing > Plans."
+  },
+  {
+    "title": "Contact Support",
+    "content": "Support is available via the Help Center or email support@company.com."
+  }
+]
