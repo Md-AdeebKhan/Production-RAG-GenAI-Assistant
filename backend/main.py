@@ -1,162 +1,79 @@
 import os
-import json
-import requests
-import numpy as np
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 from dotenv import load_dotenv
-from sklearn.metrics.pairwise import cosine_similarity
-from sentence_transformers import SentenceTransformer
-from fastapi.middleware.cors import CORSMiddleware
-# -----------------------------
-# Load Environment Variables
-# -----------------------------
-load_dotenv()
-API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
-if not API_KEY:
+from langchain_openai import ChatOpenAI
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+load_dotenv()
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+
+if not DEEPSEEK_API_KEY:
     raise ValueError("DEEPSEEK_API_KEY not found in .env file")
 
-BASE_URL = "https://api.deepseek.com/v1"
 
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-# -----------------------------
-# Load Local Embedding Model
-# -----------------------------
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+def load_and_split_pdf(file_path: str):
+    loader = PyPDFLoader(file_path)
+    docs = loader.load()
 
-# -----------------------------
-# Load Documents
-# -----------------------------
-with open("docs.json", "r", encoding="utf-8") as f:
-    documents = json.load(f)
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=100
+    )
 
-# -----------------------------
-# Document Chunking
-# -----------------------------
-def chunk_text(text, chunk_size=400):
-    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+    return splitter.split_documents(docs)
 
-chunks = []
 
-for doc in documents:
-    for chunk in chunk_text(doc["content"]):
-        chunks.append({
-            "title": doc["title"],
-            "content": chunk,
-            "embedding": None
-        })
+def create_vectorstore(documents):
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
 
-# -----------------------------
-# Generate Embeddings at Startup
-# -----------------------------
-print("Generating document embeddings...")
+    return Chroma.from_documents(
+        documents=documents,
+        embedding=embeddings,
+        persist_directory="./chroma_db"
+    )
 
-for chunk in chunks:
-    chunk["embedding"] = embedding_model.encode(chunk["content"])
 
-print("Embeddings generated successfully.")
+def create_rag_chain(vectorstore):
 
-# -----------------------------
-# Request Model
-# -----------------------------
-class ChatRequest(BaseModel):
-    sessionId: str
-    message: str
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 7})
 
-# -----------------------------
-# Chat Endpoint
-# -----------------------------
-@app.post("/api/chat")
-def chat(request: ChatRequest):
+    llm = ChatOpenAI(
+        api_key=DEEPSEEK_API_KEY,
+        base_url="https://api.deepseek.com/v1",
+        model="deepseek-chat",
+        temperature=0
+    )
 
-    if not request.message.strip():
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    prompt = ChatPromptTemplate.from_template(
+        """
+        You are a precise AI assistant.
+        Answer ONLY using the provided context.
+        If the answer is not found in the context, say "I don't know."
 
-    try:
-        # 1. Embed user query
-        query_embedding = embedding_model.encode(request.message)
+        Context:
+        {context}
 
-        # 2. Compute cosine similarity
-        similarity_scores = []
+        Question:
+        {question}
+        """
+    )
 
-        for chunk in chunks:
-            score = cosine_similarity(
-                [query_embedding],
-                [chunk["embedding"]]
-            )[0][0]
+    def format_docs(docs):
+        return "\n\n".join(doc.page_content for doc in docs)
 
-            similarity_scores.append((score, chunk))
-
-        # 3. Sort by similarity
-        similarity_scores.sort(reverse=True, key=lambda x: x[0])
-
-        # 4. Retrieve top 3
-        top_chunks = similarity_scores[:3]
-
-        # 5. Similarity threshold
-        if top_chunks[0][0] < 0.3:
-            return {
-                "reply": "I do not have enough information to answer that.",
-                "tokensUsed": 0,
-                "retrievedChunks": 0
-            }
-
-        # 6. Build context
-        context = "\n\n".join([c[1]["content"] for c in top_chunks])
-
-        # 7. Construct grounded prompt
-        prompt = f"""
-You are a grounded AI assistant.
-
-Use ONLY the provided context to answer.
-If the answer is not in the context, say:
-"I do not have enough information."
-
-Context:
-{context}
-
-Question:
-{request.message}
-"""
-
-        # 8. Call DeepSeek Chat API
-        response = requests.post(
-            f"{BASE_URL}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "deepseek-chat",
-                "temperature": 0.2,
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ]
-            },
-            timeout=60
-        )
-
-        if response.status_code != 200:
-            raise HTTPException(status_code=500, detail=response.text)
-
-        result = response.json()
-
-        reply = result["choices"][0]["message"]["content"]
-        tokens_used = result.get("usage", {}).get("total_tokens", 0)
-
-        return {
-            "reply": reply,
-            "tokensUsed": tokens_used,
-            "retrievedChunks": len(top_chunks)
+    chain = (
+        {
+            "context": retriever | format_docs,
+            "question": lambda x: x
         }
+        | prompt | llm | StrOutputParser()
+    )
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return chain
