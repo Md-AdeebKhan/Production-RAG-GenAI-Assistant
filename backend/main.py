@@ -80,8 +80,13 @@ Question:
     )
 
     def format_docs(docs):
-        return "\n\n".join(doc.page_content for doc in docs)
+        context = "\n\n".join(doc.page_content for doc in docs)
 
+    # always include first chunk (usually contains name/header)
+        if docs:
+            context = docs[0].page_content + "\n\n" + context
+
+        return context
     chain = (
         {
             "context": retriever | format_docs,
