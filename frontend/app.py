@@ -3,7 +3,6 @@ import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-
 import streamlit as st
 import tempfile
 
@@ -16,10 +15,18 @@ from backend.main import (
 st.set_page_config(page_title="DeepSeek RAG", layout="wide")
 
 st.title("📄 DeepSeek RAG - PDF Chat")
+st.caption("Upload a PDF document and ask questions based on its content using Retrieval-Augmented Generation.")
 
 # Store RAG chain in session
 if "rag_chain" not in st.session_state:
     st.session_state.rag_chain = None
+
+
+# -------- CLEAR CHAT BUTTON --------
+if st.button("Clear Chat"):
+    st.session_state.rag_chain = None
+    st.rerun()
+
 
 # -------- FILE UPLOAD --------
 uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
@@ -38,6 +45,7 @@ if uploaded_file is not None:
 
     st.success("PDF processed successfully!")
 
+
 # -------- QUESTION INPUT --------
 if st.session_state.rag_chain:
 
@@ -48,4 +56,4 @@ if st.session_state.rag_chain:
             response = st.session_state.rag_chain.invoke(user_question)
 
         st.markdown("### 📌 Answer")
-        st.write(response)
+        st.markdown(response)
