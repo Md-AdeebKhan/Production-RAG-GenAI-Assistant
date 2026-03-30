@@ -24,8 +24,8 @@ def load_and_split_pdf(file_path: str):
     docs = loader.load()
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=300,
-        chunk_overlap=50
+        chunk_size=800,
+        chunk_overlap=150
     )
 
     return splitter.split_documents(docs)
@@ -52,8 +52,8 @@ def create_rag_chain(vectorstore):
     retriever = vectorstore.as_retriever(
         search_type="mmr",
         search_kwargs={
-            "k": 8,
-            "fetch_k": 20
+            "k": 12,
+            "fetch_k": 40
         }
     )
 
@@ -66,27 +66,41 @@ def create_rag_chain(vectorstore):
 
     prompt = ChatPromptTemplate.from_template(
         """
-You are a precise AI assistant.
+You are an intelligent document assistant.
 
-Answer ONLY using the provided context.
-If the answer is not found in the context, say "I don't know."
+Answer the user's question using the provided document context.
+
+Rules:
+- Use the context to find the answer.
+- If the question uses different wording but refers to the same concept in the document, still answer using the context.
+- Consider related words, synonyms, or paraphrased questions when matching the answer.
+- Do NOT invent information that is not present in the document.
+- If the answer truly does not exist in the provided context, respond with: "I don't know."
 
 Context:
 {context}
 
 Question:
 {question}
+
+Answer:
 """
     )
 
     def format_docs(docs):
+
+        if not docs:
+            return ""
+
+        # Combine retrieved chunks
         context = "\n\n".join(doc.page_content for doc in docs)
 
-    # always include first chunk (usually contains name/header)
-        if docs:
-            context = docs[0].page_content + "\n\n" + context
+        # Ensure first chunk is included (often contains headers / names)
+        context = docs[0].page_content + "\n\n" + context
 
         return context
+
+
     chain = (
         {
             "context": retriever | format_docs,
