@@ -42,7 +42,9 @@ def create_vectorstore(documents):
 
 def create_rag_chain(vectorstore):
 
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 7})
+    retriever = vectorstore.as_retriever(
+        search_type = "mmr",
+        search_kwargs={"k": 20})
 
     llm = ChatOpenAI(
         api_key=DEEPSEEK_API_KEY,
