@@ -24,8 +24,8 @@ def load_and_split_pdf(file_path: str):
     docs = loader.load()
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=150
+        chunk_size=1200,
+        chunk_overlap=250
     )
 
     return splitter.split_documents(docs)
@@ -35,7 +35,8 @@ def load_and_split_pdf(file_path: str):
 def create_vectorstore(documents):
 
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
+        model_name="BAAI/bge-small-en-v1.5",
+        encode_kwargs={"normalize_embeddings": True}
     )
 
     vectorstore = Chroma.from_documents(
@@ -52,8 +53,8 @@ def create_rag_chain(vectorstore):
     retriever = vectorstore.as_retriever(
         search_type="mmr",
         search_kwargs={
-            "k": 12,
-            "fetch_k": 40
+            "k": 20,
+            "fetch_k": 60
         }
     )
 
@@ -70,11 +71,11 @@ You are an intelligent document assistant.
 
 Answer the user's question using the provided document context.
 
-Rules:
-- Use the context to find the answer.
-- If the question uses different wording but refers to the same concept in the document, still answer using the context.
-- Consider related words, synonyms, or paraphrased questions when matching the answer.
-- Do NOT invent information that is not present in the document.
+Instructions:
+- Use the context to determine the best possible answer.
+- The question may use different wording, synonyms, or paraphrasing.
+- If the question is related to the information in the document, answer using the relevant context.
+- Do NOT invent information that does not exist in the context.
 - If the answer truly does not exist in the provided context, respond with: "I don't know."
 
 Context:
@@ -92,11 +93,8 @@ Answer:
         if not docs:
             return ""
 
-        # Combine retrieved chunks
+        # combine retrieved chunks
         context = "\n\n".join(doc.page_content for doc in docs)
-
-        # Ensure first chunk is included (often contains headers / names)
-        context = docs[0].page_content + "\n\n" + context
 
         return context
 
