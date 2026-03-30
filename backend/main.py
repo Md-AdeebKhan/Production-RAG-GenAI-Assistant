@@ -10,41 +10,52 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 load_dotenv()
+
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
 if not DEEPSEEK_API_KEY:
-    raise ValueError("DEEPSEEK_API_KEY not found in .env file")
+    raise ValueError("DEEPSEEK_API_KEY not found in environment variables")
 
 
+# -------- LOAD AND SPLIT PDF --------
 def load_and_split_pdf(file_path: str):
+
     loader = PyPDFLoader(file_path)
     docs = loader.load()
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100
+        chunk_size=300,
+        chunk_overlap=50
     )
 
     return splitter.split_documents(docs)
 
 
+# -------- VECTOR STORE --------
 def create_vectorstore(documents):
+
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    return Chroma.from_documents(
+    vectorstore = Chroma.from_documents(
         documents=documents,
-        embedding=embeddings,
-        persist_directory="./chroma_db"
+        embedding=embeddings
     )
 
+    return vectorstore
 
+
+# -------- RAG CHAIN --------
 def create_rag_chain(vectorstore):
 
     retriever = vectorstore.as_retriever(
-        search_type = "mmr",
-        search_kwargs={"k": 20})
+        search_type="mmr",
+        search_kwargs={
+            "k": 8,
+            "fetch_k": 20
+        }
+    )
 
     llm = ChatOpenAI(
         api_key=DEEPSEEK_API_KEY,
@@ -55,16 +66,17 @@ def create_rag_chain(vectorstore):
 
     prompt = ChatPromptTemplate.from_template(
         """
-        You are a precise AI assistant.
-        Answer ONLY using the provided context.
-        If the answer is not found in the context, say "I don't know."
+You are a precise AI assistant.
 
-        Context:
-        {context}
+Answer ONLY using the provided context.
+If the answer is not found in the context, say "I don't know."
 
-        Question:
-        {question}
-        """
+Context:
+{context}
+
+Question:
+{question}
+"""
     )
 
     def format_docs(docs):
@@ -75,7 +87,9 @@ def create_rag_chain(vectorstore):
             "context": retriever | format_docs,
             "question": lambda x: x
         }
-        | prompt | llm | StrOutputParser()
+        | prompt
+        | llm
+        | StrOutputParser()
     )
 
     return chain
